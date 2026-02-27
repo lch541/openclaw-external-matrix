@@ -1,30 +1,11 @@
-import { Server, Socket } from "socket.io";
+import { EventEmitter } from "events";
 import { MatrixClient, MatrixConfig } from "./MatrixClient";
 
-export class Bridge {
+export class Bridge extends EventEmitter {
   private matrix: MatrixClient | null = null;
 
-  constructor(private io: Server) {
-    this.setupSocket();
-  }
-
-  private setupSocket() {
-    this.io.on("connection", (socket: Socket) => {
-      console.log("Bridge: OpenClaw connected");
-
-      socket.on("openclaw_update", (data: { update: string }) => {
-        this.matrix?.sendMessage(`[OpenClaw Operation]: ${data.update}`, "m.notice");
-      });
-
-      socket.on("openclaw_typing", (data: { isTyping: boolean }) => {
-        this.matrix?.sendTyping(data.isTyping);
-      });
-
-      socket.on("openclaw_response", (data: { response: string }) => {
-        this.matrix?.sendMessage(data.response);
-        this.matrix?.sendTyping(false);
-      });
-    });
+  constructor() {
+    super();
   }
 
   async connectMatrix(config: MatrixConfig) {
@@ -32,8 +13,8 @@ export class Bridge {
     
     this.matrix = new MatrixClient(config);
     await this.matrix.start((sender, body) => {
-      // Forward all messages (including commands) to OpenClaw frontend without filtering
-      this.io.emit("matrix_message", { sender, body });
+      // Forward all messages (including commands) to OpenClaw without filtering
+      this.emit("matrix_message", { sender, body });
     });
   }
 
@@ -44,5 +25,22 @@ export class Bridge {
   async createPrivateChat(userId: string) {
     if (!this.matrix) throw new Error("Matrix not connected");
     return await this.matrix.createPrivateRoom(userId);
+  }
+
+  sendToMatrix(text: string) {
+    this.matrix?.sendMessage(text);
+    this.matrix?.sendTyping(false);
+  }
+
+  sendNotice(text: string) {
+    this.matrix?.sendMessage(`[OpenClaw Operation]: ${text}`, "m.notice");
+  }
+
+  setTyping(isTyping: boolean) {
+    this.matrix?.sendTyping(isTyping);
+  }
+
+  stop() {
+    this.matrix?.stop();
   }
 }

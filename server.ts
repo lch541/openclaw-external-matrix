@@ -44,7 +44,19 @@ if (isMainModule) {
   const app = express();
   const httpServer = createServer(app);
   const io = new Server(httpServer, { cors: { origin: "*" } });
-  bridgeInstance = new Bridge(io);
+  bridgeInstance = new Bridge();
+
+  // Wire Bridge events to Socket.io for standalone frontend
+  bridgeInstance.on("matrix_message", (data) => {
+    io.emit("matrix_message", data);
+  });
+
+  io.on("connection", (socket) => {
+    console.log("Bridge: Standalone frontend connected");
+    socket.on("openclaw_update", (data: { update: string }) => bridgeInstance?.sendNotice(data.update));
+    socket.on("openclaw_typing", (data: { isTyping: boolean }) => bridgeInstance?.setTyping(data.isTyping));
+    socket.on("openclaw_response", (data: { response: string }) => bridgeInstance?.sendToMatrix(data.response));
+  });
 
   app.use(cors());
   app.use(express.json());
@@ -97,24 +109,64 @@ if (isMainModule) {
 
 // Export for OpenClaw plugin system
 export default class OpenClawMatrixPlugin {
-  private bridge: Bridge | null = null;
+  private bridge: Bridge;
   
   constructor(private openclawContext: any) {
-    // Initialize bridge without a socket.io server if running inside OpenClaw
-    // The actual OpenClaw integration would use openclawContext
+    this.bridge = new Bridge();
+    
+    // 1. Matrix -> OpenClaw (Receive all messages including / commands)
+    this.bridge.on("matrix_message", async ({ sender, body }) => {
+      console.log(`[Matrix -> OpenClaw] ${sender}: ${body}`);
+      // Try standard OpenClaw plugin API patterns to inject the message
+      if (this.openclawContext?.emit) {
+        this.openclawContext.emit("message", { platform: "matrix", sender, text: body });
+      } else if (this.openclawContext?.onMessage) {
+        this.openclawContext.onMessage(body, sender, "matrix");
+      } else {
+        console.warn("[Matrix Plugin] openclawContext does not have a recognized message receiver.");
+      }
+    });
+
+    // 2. OpenClaw -> Matrix (Send messages, typing, updates)
+    if (this.openclawContext?.on) {
+      // Listen for text responses
+      this.openclawContext.on("send_message", (data: any) => {
+        const text = typeof data === "string" ? data : data.text || data.response;
+        if (text) this.bridge.sendToMatrix(text);
+      });
+
+      // Listen for typing status
+      this.openclawContext.on("typing", (data: any) => {
+        const isTyping = typeof data === "boolean" ? data : data.isTyping;
+        this.bridge.setTyping(!!isTyping);
+      });
+
+      // Listen for system updates/notices
+      this.openclawContext.on("system_update", (data: any) => {
+        const text = typeof data === "string" ? data : data.update || data.text;
+        if (text) this.bridge.sendNotice(text);
+      });
+    }
   }
 
   async start() {
     console.log("Matrix Plugin started by OpenClaw");
     const config = loadConfig();
     if (config?.accessToken) {
-      // In a real OpenClaw plugin, we would connect the matrix client directly to OpenClaw's event system
-      // For now, we just log that it would start
-      console.log("Matrix config found, ready to connect.");
+      console.log("Matrix config found, connecting...");
+      try {
+        await this.bridge.connectMatrix(config);
+        console.log("Matrix connected successfully in OpenClaw.");
+      } catch (e) {
+        console.error("Matrix connection failed:", e);
+      }
+    } else {
+      console.log("Matrix config not found. Please configure via UI.");
     }
   }
 
   async stop() {
     console.log("Matrix Plugin stopped by OpenClaw");
+    this.bridge.stop();
   }
 }

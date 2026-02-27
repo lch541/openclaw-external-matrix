@@ -31,9 +31,38 @@ else
     echo "[提示] 插件目录不存在，可能已经被移除。"
 fi
 
-# 3. 重启 OpenClaw
+# 3. 从 OpenClaw 配置中移除插件
 echo ""
-echo ">>> 步骤 3: 重启 OpenClaw"
+echo ">>> 步骤 3: 从 OpenClaw 配置中移除插件"
+OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
+if [ ! -f "$OPENCLAW_CONFIG" ]; then
+    ALT_CONFIG=$(ls /home/*/.openclaw/openclaw.json 2>/dev/null | head -n 1 || true)
+    if [ -n "$ALT_CONFIG" ]; then
+        OPENCLAW_CONFIG="$ALT_CONFIG"
+    fi
+fi
+
+if [ -f "$OPENCLAW_CONFIG" ]; then
+    if command -v jq &> /dev/null; then
+        jq "del(.plugins.installs[\"@openclaw/matrix-plugin\"])" "$OPENCLAW_CONFIG" > "${OPENCLAW_CONFIG}.tmp" && mv "${OPENCLAW_CONFIG}.tmp" "$OPENCLAW_CONFIG"
+        echo "[成功] 已从 openclaw.json 移除插件注册信息。"
+    else
+        echo "[警告] 未找到 jq 命令，无法自动修改 openclaw.json。"
+    fi
+fi
+
+# 4. 运行 OpenClaw Doctor 修复潜在的配置错误
+echo ""
+echo ">>> 步骤 4: 运行 openclaw doctor --fix"
+if command -v openclaw &> /dev/null; then
+    openclaw doctor --fix || true
+else
+    npx -y @openclaw/cli doctor --fix || true
+fi
+
+# 5. 重启 OpenClaw
+echo ""
+echo ">>> 步骤 5: 重启 OpenClaw"
 if command -v pm2 &> /dev/null && pm2 describe openclaw &> /dev/null; then
     pm2 restart openclaw
     echo "[成功] 已通过 pm2 重启 OpenClaw。"
