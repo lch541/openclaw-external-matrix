@@ -2,25 +2,29 @@
 
 This plugin allows **OpenClaw** to communicate over the Matrix protocol. It features end-to-end encryption (handled by the client), real-time typing indicators, and operation stream updates.
 
-## 🚀 Installation
+## 🚀 一键安装 (One-Click Installation)
 
-1. **Copy the Folder**: Copy this entire directory into your OpenClaw `extensions/` or `plugins/` folder.
-   ```bash
-   cp -r openclaw-matrix-plugin /path/to/openclaw/extensions/
-   ```
+You can install the plugin directly into your OpenClaw instance using a single command. 
+**Please run this command in your OpenClaw root directory:**
 
-2. **Install Dependencies**:
-   Navigate to the plugin folder and install the required packages:
-   ```bash
-   cd /path/to/openclaw/extensions/openclaw-matrix-plugin
-   npm install
-   ```
+```bash
+curl -sSL https://raw.githubusercontent.com/lch541/matrix_plugin/main/install.sh | bash
+```
 
-3. **Onboarding**:
-   - Restart OpenClaw.
-   - Go to the **Extensions** settings in the OpenClaw dashboard.
-   - Click **Enable** on the "Matrix Communication Bridge".
-   - Follow the onboarding wizard to enter your Matrix credentials (Homeserver, User ID, Access Token, and Room ID).
+The script will automatically:
+1. Backup your OpenClaw `config.json`.
+2. Download the plugin into `extensions/matrix-plugin`.
+3. Install dependencies.
+4. Prompt you for your Matrix credentials (Homeserver, User ID, Access Token, Room ID).
+5. Restart OpenClaw to apply the changes.
+
+## 🗑️ 一键卸载 (One-Click Uninstallation)
+
+If you need to remove the plugin and restore your OpenClaw configuration to its previous state, run:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/lch541/matrix_plugin/main/uninstall.sh | bash
+```
 
 ## 🛠 Features
 
