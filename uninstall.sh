@@ -43,7 +43,7 @@ if [ ! -f "$OPENCLAW_CONFIG" ]; then
 fi
 
 if [ -f "$OPENCLAW_CONFIG" ]; then
-    cat > "$OPENCLAW_DIR/remove_config.js" << 'EOF'
+    cat > "$OPENCLAW_DIR/remove_config.cjs" << 'EOF'
 const fs = require('fs');
 const path = process.argv[2];
 
@@ -66,8 +66,8 @@ try {
 }
 EOF
     
-    node "$OPENCLAW_DIR/remove_config.js" "$OPENCLAW_CONFIG"
-    rm "$OPENCLAW_DIR/remove_config.js"
+    node "$OPENCLAW_DIR/remove_config.cjs" "$OPENCLAW_CONFIG"
+    rm "$OPENCLAW_DIR/remove_config.cjs"
 fi
 
 # 4. 运行 OpenClaw Doctor 修复潜在的配置错误

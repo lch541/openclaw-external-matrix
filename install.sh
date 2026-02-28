@@ -94,7 +94,7 @@ if [ -f "$OPENCLAW_CONFIG" ]; then
     cp "$OPENCLAW_CONFIG" "${OPENCLAW_CONFIG}.matrix_backup_$(date +%s)"
     
     # 使用 Node.js 脚本安全地修改 JSON5 文件，避免 jq 破坏格式
-    cat > "$PLUGIN_DIR/update_config.js" << 'EOF'
+    cat > "$PLUGIN_DIR/update_config.cjs" << 'EOF'
 const fs = require('fs');
 const path = process.argv[2];
 const pluginDir = process.argv[3];
@@ -127,8 +127,8 @@ try {
 }
 EOF
     
-    node "$PLUGIN_DIR/update_config.js" "$OPENCLAW_CONFIG" "$PLUGIN_DIR"
-    rm "$PLUGIN_DIR/update_config.js"
+    node "$PLUGIN_DIR/update_config.cjs" "$OPENCLAW_CONFIG" "$PLUGIN_DIR"
+    rm "$PLUGIN_DIR/update_config.cjs"
 else
     echo "[提示] 未找到 openclaw.json，跳过自动注册。"
 fi
