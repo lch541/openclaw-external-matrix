@@ -2,7 +2,7 @@
 set -e
 
 echo "================================================="
-echo "  OpenClaw Matrix Plugin 一键卸载脚本"
+echo "  OpenClaw Matrix Plugin 一键卸载与清理脚本"
 echo "================================================="
 
 OPENCLAW_DIR=$(pwd)
@@ -55,34 +55,58 @@ try {
 EOF
         
         node "$OPENCLAW_DIR/remove_config.cjs" "$OPENCLAW_CONFIG"
-        rm "$OPENCLAW_DIR/remove_config.cjs"
+        rm -f "$OPENCLAW_DIR/remove_config.cjs"
     fi
 else
     echo "[警告] 未找到 openclaw.json，跳过配置恢复。"
 fi
 
-# 3. 移除插件目录
+# 3. 彻底移除插件目录和相关文件
 echo ""
-echo ">>> 步骤 3: 移除 Matrix 插件"
+echo ">>> 步骤 3: 彻底清理 Matrix 插件文件"
 if [ -d "$PLUGIN_DIR" ]; then
     rm -rf "$PLUGIN_DIR"
-    echo "[成功] 插件目录已删除。"
+    echo "[成功] 插件目录 ($PLUGIN_DIR) 已彻底删除。"
 else
-    echo "[提示] 插件目录不存在，可能已经被移除。"
+    echo "[提示] 插件目录不存在，无需清理。"
 fi
 
-# 4. 运行 OpenClaw Doctor 修复潜在的配置错误
+# 清理可能残留在当前目录的备份文件或临时文件
+rm -f "$OPENCLAW_DIR"/config.json.matrix_plugin_backup_*
+rm -f "$OPENCLAW_DIR"/remove_config.cjs
+echo "[成功] 临时文件清理完毕。"
+
+# 4. 清理 OpenClaw 未完成的 Session
 echo ""
-echo ">>> 步骤 4: 运行 openclaw doctor --fix"
+echo ">>> 步骤 4: 清理 OpenClaw 会话缓存"
+SESSIONS_DIR="$HOME/.openclaw/sessions"
+if [ ! -d "$SESSIONS_DIR" ]; then
+    ALT_SESSIONS=$(ls -d /home/*/.openclaw/sessions 2>/dev/null | head -n 1 || true)
+    if [ -n "$ALT_SESSIONS" ]; then
+        SESSIONS_DIR="$ALT_SESSIONS"
+    fi
+fi
+
+if [ -d "$SESSIONS_DIR" ]; then
+    # 删除所有 session 文件，强制 OpenClaw 在重启后开启全新会话
+    rm -rf "$SESSIONS_DIR"/*
+    echo "[成功] 已清理 OpenClaw 会话缓存 ($SESSIONS_DIR)。"
+else
+    echo "[提示] 未找到 OpenClaw 会话目录，跳过清理。"
+fi
+
+# 5. 运行 OpenClaw Doctor 修复潜在的配置错误
+echo ""
+echo ">>> 步骤 5: 运行 openclaw doctor --fix"
 if command -v openclaw &> /dev/null; then
     openclaw doctor --fix || true
 else
     npx -y @openclaw/cli doctor --fix || true
 fi
 
-# 5. 重启 OpenClaw
+# 6. 重启 OpenClaw
 echo ""
-echo ">>> 步骤 5: 重启 OpenClaw"
+echo ">>> 步骤 6: 重启 OpenClaw"
 if command -v pm2 &> /dev/null && pm2 describe openclaw &> /dev/null; then
     pm2 restart openclaw
     echo "[成功] 已通过 pm2 重启 OpenClaw。"
@@ -95,5 +119,6 @@ else
 fi
 
 echo "================================================="
-echo "  卸载完成！OpenClaw 已恢复到安装插件前的状态。"
+echo "  卸载与清理完成！"
+echo "  OpenClaw 已恢复纯净状态，随时可以重新安装插件。"
 echo "================================================="
