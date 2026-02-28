@@ -41,15 +41,18 @@ try {
   // 匹配插件配置并移除，支持嵌套的 {} 匹配
   const regexNested = /"@openclaw\/matrix-plugin"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
   const regexFlat = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,?/g;
-  
   content = content.replace(regexNested, '');
   content = content.replace(regexFlat, '');
+  
+  // 移除 channels.matrix 配置（如果有）
+  const regexChannel = /"matrix"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
+  content = content.replace(regexChannel, '');
   
   // 清理可能产生的多余逗号
   content = content.replace(/,\s*,/g, ',');
   
   fs.writeFileSync(path, content, 'utf8');
-  console.log('[成功] 已从 openclaw.json 移除插件注册信息。');
+  console.log('[成功] 已从 openclaw.json 移除 Matrix 插件和信道配置。');
 } catch (e) {
   console.error('[错误] 修改配置文件失败:', e.message);
 }

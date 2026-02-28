@@ -104,38 +104,37 @@ const roomId = process.argv[6];
 try {
   let content = fs.readFileSync(path, 'utf8');
   
-  // 移除旧的配置 (支持最多1层嵌套的 {} 匹配，以及旧的无嵌套匹配)
+  // 移除旧的 plugins.installs 配置 (支持最多1层嵌套的 {} 匹配，以及旧的无嵌套匹配)
   const regexNested = /"@openclaw\/matrix-plugin"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
   const regexFlat = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,?/g;
   content = content.replace(regexNested, '');
   content = content.replace(regexFlat, '');
   
-  // OpenClaw 官方要求的正确配置格式
-  const pluginEntry = `"@openclaw/matrix-plugin": {
+  // 移除旧的 channels.matrix 配置（如果有）
+  const regexChannel = /"matrix"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
+  content = content.replace(regexChannel, '');
+  
+  // OpenClaw 官方要求的正确信道 (Channel) 配置格式
+  const channelEntry = `"matrix": {
       "enabled": true,
-      "config": {
-        "homeserver": "${homeserver}",
-        "userId": "${userId}",
-        "accessToken": "${accessToken}",
-        "roomId": "${roomId}"
-      }
+      "homeserver": "${homeserver}",
+      "userId": "${userId}",
+      "accessToken": "${accessToken}",
+      "roomId": "${roomId}"
     }`;
   
-  if (/"installs"\s*:/.test(content)) {
-    // 存在 installs 节点
-    content = content.replace(/"installs"\s*:\s*\{/, `"installs": {\n      ${pluginEntry},`);
-  } else if (/"plugins"\s*:/.test(content)) {
-    // 存在 plugins 节点，但没有 installs
-    content = content.replace(/"plugins"\s*:\s*\{/, `"plugins": {\n    "installs": {\n      ${pluginEntry}\n    },`);
+  if (/"channels"\s*:/.test(content)) {
+    // 存在 channels 节点
+    content = content.replace(/"channels"\s*:\s*\{/, `"channels": {\n      ${channelEntry},`);
   } else {
-    // 连 plugins 节点都没有，插入到文件末尾的 } 之前
+    // 连 channels 节点都没有，插入到文件末尾的 } 之前
     const lastBrace = content.lastIndexOf('}');
     if (lastBrace !== -1) {
       const beforeBrace = content.slice(0, lastBrace).trim();
       const needsComma = !beforeBrace.endsWith(',') && !beforeBrace.endsWith('{');
       const prefix = needsComma ? ',' : '';
       
-      const insertStr = `${prefix}\n  "plugins": {\n    "installs": {\n      ${pluginEntry}\n    }\n  }\n`;
+      const insertStr = `${prefix}\n  "channels": {\n    ${channelEntry}\n  }\n`;
       content = content.slice(0, lastBrace) + insertStr + content.slice(lastBrace);
     } else {
       throw new Error("Invalid JSON format: missing closing brace.");
@@ -146,7 +145,7 @@ try {
   content = content.replace(/,\s*,/g, ',');
   
   fs.writeFileSync(path, content, 'utf8');
-  console.log('[成功] 已将插件注册到 openclaw.json');
+  console.log('[成功] 已将 Matrix 配置注册到 openclaw.json 的 channels 节点');
 } catch (e) {
   console.error('[错误] 修改配置文件失败:', e.message);
 }
@@ -158,13 +157,15 @@ else
     echo "[提示] 未找到 openclaw.json，跳过自动注册。"
 fi
 
-# 7. 运行 OpenClaw Doctor 修复潜在的配置错误
+# 7. 启用插件并运行 OpenClaw Doctor 修复潜在的配置错误
 echo ""
-echo ">>> 步骤 7: 运行 openclaw doctor --fix"
+echo ">>> 步骤 7: 启用插件并运行 openclaw doctor --fix"
 if command -v openclaw &> /dev/null; then
+    openclaw plugins enable matrix || openclaw plugins enable @openclaw/matrix-plugin || true
     openclaw doctor --fix || true
 else
     # 尝试使用 npx 运行
+    npx -y @openclaw/cli plugins enable matrix || npx -y @openclaw/cli plugins enable @openclaw/matrix-plugin || true
     npx -y @openclaw/cli doctor --fix || true
 fi
 

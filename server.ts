@@ -190,8 +190,8 @@ export default class OpenClawMatrixPlugin {
   async start() {
     console.log("Matrix Plugin started by OpenClaw");
     
-    // 优先使用 OpenClaw 注入的配置，如果没有则回退到本地的 matrix_config.md
-    let config = this.openclawContext?.config;
+    // 优先使用 OpenClaw 注入的信道配置，如果没有则回退到本地的 matrix_config.md
+    let config = this.openclawContext?.channels?.matrix || this.openclawContext?.config;
     if (!config || !config.accessToken) {
       config = loadConfig();
     }
