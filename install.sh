@@ -102,24 +102,36 @@ try {
   let content = fs.readFileSync(path, 'utf8');
   
   // 如果已经存在，先移除旧的
-  const regex = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}/g;
-  content = content.replace(regex, '');
+  content = content.replace(/"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,?/g, '');
   
-  // 找到 plugins.installs 的位置并插入
-  const installsMatch = content.match(/"installs"\s*:\s*\{/);
-  if (installsMatch) {
-    const insertPos = installsMatch.index + installsMatch[0].length;
-    const newPlugin = `\n      "@openclaw/matrix-plugin": { "source": "local", "path": "${pluginDir}" },`;
-    content = content.slice(0, insertPos) + newPlugin + content.slice(insertPos);
-    
-    // 清理可能产生的多余逗号
-    content = content.replace(/,\s*,/g, ',');
-    
-    fs.writeFileSync(path, content, 'utf8');
-    console.log('[成功] 已将插件注册到 openclaw.json');
+  const pluginEntry = `"@openclaw/matrix-plugin": { "source": "local", "path": "${pluginDir}" }`;
+  
+  if (/"installs"\s*:/.test(content)) {
+    // 存在 installs 节点
+    content = content.replace(/"installs"\s*:\s*\{/, `"installs": {\n      ${pluginEntry},`);
+  } else if (/"plugins"\s*:/.test(content)) {
+    // 存在 plugins 节点，但没有 installs
+    content = content.replace(/"plugins"\s*:\s*\{/, `"plugins": {\n    "installs": {\n      ${pluginEntry}\n    },`);
   } else {
-    console.log('[警告] 未找到 plugins.installs 节点，无法自动注册。');
+    // 连 plugins 节点都没有，插入到文件末尾的 } 之前
+    const lastBrace = content.lastIndexOf('}');
+    if (lastBrace !== -1) {
+      const beforeBrace = content.slice(0, lastBrace).trim();
+      const needsComma = !beforeBrace.endsWith(',') && !beforeBrace.endsWith('{');
+      const prefix = needsComma ? ',' : '';
+      
+      const insertStr = `${prefix}\n  "plugins": {\n    "installs": {\n      ${pluginEntry}\n    }\n  }\n`;
+      content = content.slice(0, lastBrace) + insertStr + content.slice(lastBrace);
+    } else {
+      throw new Error("Invalid JSON format: missing closing brace.");
+    }
   }
+  
+  // 清理可能产生的多余逗号
+  content = content.replace(/,\s*,/g, ',');
+  
+  fs.writeFileSync(path, content, 'utf8');
+  console.log('[成功] 已将插件注册到 openclaw.json');
 } catch (e) {
   console.error('[错误] 修改配置文件失败:', e.message);
 }
