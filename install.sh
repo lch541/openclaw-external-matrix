@@ -83,7 +83,6 @@ echo ""
 echo ">>> 步骤 6: 注册插件到 OpenClaw"
 OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
 if [ ! -f "$OPENCLAW_CONFIG" ]; then
-    # 尝试在其他用户的 home 目录下寻找 (应对 sudo 执行的情况)
     ALT_CONFIG=$(ls /home/*/.openclaw/openclaw.json 2>/dev/null | head -n 1 || true)
     if [ -n "$ALT_CONFIG" ]; then
         OPENCLAW_CONFIG="$ALT_CONFIG"
@@ -94,14 +93,42 @@ if [ -f "$OPENCLAW_CONFIG" ]; then
     echo "[提示] 找到 OpenClaw 配置文件: $OPENCLAW_CONFIG"
     cp "$OPENCLAW_CONFIG" "${OPENCLAW_CONFIG}.matrix_backup_$(date +%s)"
     
-    if command -v jq &> /dev/null; then
-        # 尝试自动写入正确的 source 格式 (通常是 local 加上 path)
-        # 如果之前有错误的 source 格式，这里会覆盖修复
-        jq ".plugins.installs[\"@openclaw/matrix-plugin\"] = {\"source\": \"local\", \"path\": \"$PLUGIN_DIR\"}" "$OPENCLAW_CONFIG" > "${OPENCLAW_CONFIG}.tmp" && mv "${OPENCLAW_CONFIG}.tmp" "$OPENCLAW_CONFIG"
-        echo "[成功] 已将插件注册到 openclaw.json"
-    else
-        echo "[警告] 未找到 jq 命令，跳过自动修改 openclaw.json。"
-    fi
+    # 使用 Node.js 脚本安全地修改 JSON5 文件，避免 jq 破坏格式
+    cat > "$PLUGIN_DIR/update_config.js" << 'EOF'
+const fs = require('fs');
+const path = process.argv[2];
+const pluginDir = process.argv[3];
+
+try {
+  // 尝试使用简单的正则替换，因为 openclaw.json 可能是 json5 格式，JSON.parse 可能会失败
+  let content = fs.readFileSync(path, 'utf8');
+  
+  // 如果已经存在，先移除旧的
+  const regex = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}/g;
+  content = content.replace(regex, '');
+  
+  // 找到 plugins.installs 的位置并插入
+  const installsMatch = content.match(/"installs"\s*:\s*\{/);
+  if (installsMatch) {
+    const insertPos = installsMatch.index + installsMatch[0].length;
+    const newPlugin = `\n      "@openclaw/matrix-plugin": { "source": "local", "path": "${pluginDir}" },`;
+    content = content.slice(0, insertPos) + newPlugin + content.slice(insertPos);
+    
+    // 清理可能产生的多余逗号 (简单的清理，不完美但有效)
+    content = content.replace(/,\s*,/g, ',');
+    
+    fs.writeFileSync(path, content, 'utf8');
+    console.log('[成功] 已将插件注册到 openclaw.json');
+  } else {
+    console.log('[警告] 未找到 plugins.installs 节点，无法自动注册。');
+  }
+} catch (e) {
+  console.error('[错误] 修改配置文件失败:', e.message);
+}
+EOF
+    
+    node "$PLUGIN_DIR/update_config.js" "$OPENCLAW_CONFIG" "$PLUGIN_DIR"
+    rm "$PLUGIN_DIR/update_config.js"
 else
     echo "[提示] 未找到 openclaw.json，跳过自动注册。"
 fi

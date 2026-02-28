@@ -43,12 +43,31 @@ if [ ! -f "$OPENCLAW_CONFIG" ]; then
 fi
 
 if [ -f "$OPENCLAW_CONFIG" ]; then
-    if command -v jq &> /dev/null; then
-        jq "del(.plugins.installs[\"@openclaw/matrix-plugin\"])" "$OPENCLAW_CONFIG" > "${OPENCLAW_CONFIG}.tmp" && mv "${OPENCLAW_CONFIG}.tmp" "$OPENCLAW_CONFIG"
-        echo "[成功] 已从 openclaw.json 移除插件注册信息。"
-    else
-        echo "[警告] 未找到 jq 命令，无法自动修改 openclaw.json。"
-    fi
+    cat > "$OPENCLAW_DIR/remove_config.js" << 'EOF'
+const fs = require('fs');
+const path = process.argv[2];
+
+try {
+  let content = fs.readFileSync(path, 'utf8');
+  
+  // 匹配插件配置并移除，包括可能的前导逗号或尾随逗号
+  const regex1 = /,\s*"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}/g;
+  const regex2 = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,/g;
+  const regex3 = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}/g;
+  
+  content = content.replace(regex1, '');
+  content = content.replace(regex2, '');
+  content = content.replace(regex3, '');
+  
+  fs.writeFileSync(path, content, 'utf8');
+  console.log('[成功] 已从 openclaw.json 移除插件注册信息。');
+} catch (e) {
+  console.error('[错误] 修改配置文件失败:', e.message);
+}
+EOF
+    
+    node "$OPENCLAW_DIR/remove_config.js" "$OPENCLAW_CONFIG"
+    rm "$OPENCLAW_DIR/remove_config.js"
 fi
 
 # 4. 运行 OpenClaw Doctor 修复潜在的配置错误
