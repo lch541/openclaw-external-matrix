@@ -27,6 +27,10 @@ export function setupCommandListener() {
     try {
       if (cmd === "revive") {
         const token = parts[2];
+        if (!token) {
+          await matrixClient.sendMessage(roomId, "❌ 请提供 Token: openclaw revive <TOKEN>");
+          return;
+        }
         await reviveCommand.execute(roomId, token);
       } else if (cmd === "token") {
         if (subCmd === "set") {

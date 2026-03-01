@@ -1,12 +1,12 @@
 import { exec } from "child_process";
+import { promisify } from "util";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { matrixClient } from "../matrix/client.js";
 import path from "path";
-import { fileURLToPath } from "url";
+import os from "os";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const execAsync = promisify(exec);
 
 export const reviveCommand = {
   execute: async (roomId: string, token: string) => {
@@ -25,22 +25,20 @@ export const reviveCommand = {
     await matrixClient.sendMessage(roomId, "✅ 验证通过，正在触发回滚...");
     await matrixClient.sendMessage(roomId, "🔄 正在执行回滚...");
     
-    // 假设 revive.sh 在 OpenClaw 根目录，这里需要根据实际情况调整
-    // 暂时假设它在项目根目录的上一级 (OpenClaw 目录)
-    const scriptPath = path.join(__dirname, "../../../revive.sh");
+    const scriptPath = path.join(os.homedir(), ".openclaw/gardian", "openclaw-revive.sh");
     
-    exec(`bash ${scriptPath}`, async (error, stdout, stderr) => {
-      if (error) {
-        logger.error(`执行 revive.sh 失败: ${error.message}`);
-        await matrixClient.sendMessage(roomId, `❌ 回滚失败: ${error.message}`);
-        return;
-      }
+    try {
+      const { stdout, stderr } = await execAsync(`bash ${scriptPath}`);
+      
       if (stderr) {
         logger.warn(`revive.sh 输出错误: ${stderr}`);
       }
       
       logger.info(`revive.sh 执行成功: ${stdout}`);
       await matrixClient.sendMessage(roomId, `✅ 回滚成功！\n${stdout}`);
-    });
+    } catch (error: any) {
+      logger.error(`执行 revive.sh 失败: ${error.message}`);
+      await matrixClient.sendMessage(roomId, `❌ 回滚失败: ${error.message}`);
+    }
   }
 };
