@@ -26,26 +26,32 @@ export function setupCommandListener() {
 
     try {
       if (cmd === "revive") {
-        const token = parts[2];
-        if (!token) {
-          await matrixClient.sendMessage(roomId, "❌ 请提供 Token: openclaw revive <TOKEN>");
-          return;
-        }
-        await reviveCommand.execute(roomId, token);
-      } else if (cmd === "token") {
-        if (subCmd === "set") {
-          const token = parts[3];
-          if (!token) {
-            await matrixClient.sendMessage(roomId, "❌ 请提供 Token: openclaw token set <TOKEN>");
+        const subCmd = parts[2];
+        
+        if (subCmd === "token") {
+          const action = parts[3];
+          if (action === "set") {
+            const token = parts[4];
+            if (!token) {
+              await matrixClient.sendMessage(roomId, "❌ 请提供 Token: openclaw revive token set <TOKEN>");
+            } else {
+              await tokenCommand.set(roomId, token);
+            }
+          } else if (action === "show") {
+            await tokenCommand.show(roomId);
+          } else if (action === "remove") {
+            await tokenCommand.remove(roomId);
           } else {
-            await tokenCommand.set(roomId, token);
+            await matrixClient.sendMessage(roomId, "❓ 未知 token 命令。可用: set, show, remove");
           }
-        } else if (subCmd === "show") {
-          await tokenCommand.show(roomId);
-        } else if (subCmd === "remove") {
-          await tokenCommand.remove(roomId);
         } else {
-          await matrixClient.sendMessage(roomId, "❓ 未知 token 命令。可用: set, show, remove");
+          // 这里的 subCmd 实际上就是 token
+          const token = subCmd;
+          if (!token) {
+            await matrixClient.sendMessage(roomId, "❌ 请提供 Token: openclaw revive <TOKEN>");
+            return;
+          }
+          await reviveCommand.execute(roomId, token);
         }
       }
     } catch (err: any) {
