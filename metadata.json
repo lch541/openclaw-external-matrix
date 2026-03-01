@@ -1,5 +1,5 @@
 {
-  "name": "OpenClaw Matrix Plugin",
-  "description": "A Matrix communication plugin for OpenClaw with E2EE support, typing status, and real-time operation updates.",
+  "name": "OpenClaw-external-matrix",
+  "description": "A Matrix communication client for OpenClaw with E2EE support, typing status, and real-time operation updates.",
   "requestFramePermissions": []
 }

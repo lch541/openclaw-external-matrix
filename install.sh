@@ -2,14 +2,41 @@
 set -e
 
 echo "================================================="
-echo "  OpenClaw Matrix Plugin 一键安装脚本"
+echo "  OpenClaw Matrix Client 一键安装脚本 (v2.0)"
 echo "================================================="
 
 # 默认 OpenClaw 目录为当前执行目录
 OPENCLAW_DIR=$(pwd)
 PLUGIN_DIR="$OPENCLAW_DIR/extensions/matrix-plugin"
+PROXY_PORT=3344
+
+# 0. 深度清理旧环境
+echo ">>> 步骤 0: 深度清理旧的 Matrix 插件环境"
+# 停止旧进程
+if command -v pm2 &> /dev/null; then
+    pm2 delete matrix-e2ee-proxy &> /dev/null || true
+fi
+pkill -f "matrix-e2ee-proxy" || true
+pkill -f "matrix-plugin" || true
+
+# 移除旧插件目录
+if [ -d "$PLUGIN_DIR" ]; then
+    echo "[提示] 正在移除旧的插件目录: $PLUGIN_DIR"
+    rm -rf "$PLUGIN_DIR"
+fi
+
+# 移除 systemd 服务残留
+if [ -f "$HOME/.config/systemd/user/matrix-e2ee-proxy.service" ]; then
+    systemctl --user stop matrix-e2ee-proxy.service &> /dev/null || true
+    systemctl --user disable matrix-e2ee-proxy.service &> /dev/null || true
+    rm -f "$HOME/.config/systemd/user/matrix-e2ee-proxy.service"
+    systemctl --user daemon-reload
+fi
+
+echo "[成功] 旧环境清理完成。"
 
 # 1. 查找 OpenClaw 配置文件
+echo ""
 echo ">>> 步骤 1: 查找 OpenClaw 配置文件"
 OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
 if [ ! -f "$OPENCLAW_CONFIG" ]; then
@@ -21,7 +48,7 @@ fi
 
 if [ ! -f "$OPENCLAW_CONFIG" ]; then
     echo "[警告] 未找到 openclaw.json，请确保 OpenClaw 已正确安装并运行过一次。"
-    echo "插件代码将被下载，但无法自动注册到 OpenClaw 配置文件中。"
+    echo "代码将被下载，但无法自动注册到 OpenClaw 配置文件中。"
 else
     echo "[成功] 找到配置文件: $OPENCLAW_CONFIG"
     # 备份配置文件
@@ -32,21 +59,14 @@ fi
 
 # 2. 从 GitHub 克隆插件
 echo ""
-echo ">>> 步骤 2: 从 GitHub 下载 Matrix 插件"
+echo ">>> 步骤 2: 从 GitHub 下载 Matrix 客户端"
 mkdir -p "$OPENCLAW_DIR/extensions"
-if [ -d "$PLUGIN_DIR" ]; then
-    echo "[提示] 插件目录已存在，正在更新..."
-    cd "$PLUGIN_DIR"
-    git pull origin main || git pull origin master
-    cd - > /dev/null
-else
-    git clone https://github.com/lch541/matrix_plugin "$PLUGIN_DIR"
-fi
-echo "[成功] 插件下载完成。"
+git clone https://github.com/lch541/matrix_plugin "$PLUGIN_DIR"
+echo "[成功] 客户端下载完成。"
 
 # 3. 安装依赖
 echo ""
-echo ">>> 步骤 3: 安装插件依赖"
+echo ">>> 步骤 3: 安装依赖"
 cd "$PLUGIN_DIR"
 if command -v npm &> /dev/null; then
     npm install --production
@@ -79,9 +99,9 @@ USER_ID=$USER_ID
 ACCESS_TOKEN=$ACCESS_TOKEN
 ROOM_ID=$ROOM_ID
 DEVICE_ID=$DEVICE_ID
-PROXY_PORT=3000
+PROXY_PORT=$PROXY_PORT
 EOF
-echo "[成功] 代理配置已保存到 .env。"
+echo "[成功] 代理配置已保存到 .env (端口: $PROXY_PORT)。"
 
 # 6. 注册官方信道到 OpenClaw 配置
 echo ""
@@ -99,21 +119,15 @@ const roomId = process.argv[6];
 try {
   let content = fs.readFileSync(path, 'utf8');
   
-  // 彻底移除旧的插件配置 (解耦，不再需要注入插件)
-  const regexNested = /"@openclaw\/matrix-plugin"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
-  const regexFlat = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,?/g;
-  const regexCustomNested = /"@openclaw\/matrix-plugin-custom"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
-  const regexCustomFlat = /"@openclaw\/matrix-plugin-custom"\s*:\s*\{[^}]*\}\s*,?/g;
-  content = content.replace(regexNested, '');
-  content = content.replace(regexFlat, '');
-  content = content.replace(regexCustomNested, '');
-  content = content.replace(regexCustomFlat, '');
+  // 1. 彻底移除所有旧的 Matrix 插件配置 (不管是官方的还是自定义的)
+  const regexMatrixPlugin = /"@openclaw\/matrix-plugin(-custom)?"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
+  content = content.replace(regexMatrixPlugin, '');
   
-  // 移除旧的 channels.matrix 配置
+  // 2. 移除旧的 channels.matrix 配置
   const regexChannel = /"matrix"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
   content = content.replace(regexChannel, '');
   
-  // 注入官方信道 (Channel) 配置，Homeserver 指向本地代理！
+  // 3. 注入官方信道 (Channel) 配置，Homeserver 指向本地代理！
   const channelEntry = `"matrix": {
       "enabled": true,
       "homeserver": "${proxyUrl}",
@@ -135,18 +149,18 @@ try {
     }
   }
 
-  // 清理多余逗号
+  // 清理多余逗号和空行
   content = content.replace(/,\s*,/g, ',');
   content = content.replace(/,\s*\}/g, '\n  }');
   
   fs.writeFileSync(path, content, 'utf8');
-  console.log('[成功] 已将官方 Matrix 信道配置为指向本地 E2EE 代理 (127.0.0.1:3000)');
+  console.log(`[成功] 已将官方 Matrix 信道配置为指向本地代理 (${proxyUrl})`);
 } catch (e) {
   console.error('[错误] 修改配置文件失败:', e.message);
 }
 EOF
     
-    node "$PLUGIN_DIR/update_config.cjs" "$OPENCLAW_CONFIG" "http://127.0.0.1:3000" "$USER_ID" "$ACCESS_TOKEN" "$ROOM_ID"
+    node "$PLUGIN_DIR/update_config.cjs" "$OPENCLAW_CONFIG" "http://127.0.0.1:$PROXY_PORT" "$USER_ID" "$ACCESS_TOKEN" "$ROOM_ID"
     rm -f "$PLUGIN_DIR/update_config.cjs"
 else
     echo "[提示] 未找到 openclaw.json，跳过自动注册。"
@@ -223,9 +237,10 @@ elif systemctl is-active --quiet openclaw-gateway; then
     echo "[成功] 已通过 systemctl 重启 OpenClaw。"
 else
     echo "[提示] 未检测到 pm2 或 systemctl 托管的 openclaw 服务。"
-    echo "请手动重启 OpenClaw 以使插件生效。"
+    echo "请手动重启 OpenClaw 以使配置生效。"
 fi
 
 echo "================================================="
-echo "  安装完成！Matrix 插件已成功集成到 OpenClaw。"
+echo "  安装完成！Matrix 环境已清理并重新集成。"
+echo "  本地代理端口: $PROXY_PORT"
 echo "================================================="
