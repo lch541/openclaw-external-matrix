@@ -15,7 +15,26 @@ export function setupCommandListener() {
     if (content.msgtype !== "m.text") return;
     
     const body = content.body?.trim();
-    if (!body || !body.startsWith("openclaw ")) return;
+    if (!body) return;
+
+    if (body.startsWith("/verbose ")) {
+      const parts = body.split(/\s+/);
+      const subCmd = parts[1];
+      const roomId = room.roomId;
+      
+      const { progressState } = await import("../progress/state.js");
+      
+      if (subCmd === "on") {
+        progressState.enable();
+        await matrixClient.sendMessage(roomId, "✅ 进度条模式已开启");
+      } else if (subCmd === "off") {
+        progressState.disable();
+        await matrixClient.sendMessage(roomId, "⚪ 进度条模式已关闭");
+      }
+      return;
+    }
+
+    if (!body.startsWith("openclaw ")) return;
 
     const roomId = room.roomId;
     const parts = body.split(/\s+/);

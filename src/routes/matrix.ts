@@ -2,6 +2,8 @@ import { Router } from "express";
 import { matrixClient } from "../matrix/client.js";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
+import { progressState } from "../progress/state.js";
+import { formatProgressBar } from "../progress/bar.js";
 
 const router = Router();
 
@@ -60,6 +62,57 @@ router.put(["/rooms/:roomId/send/:eventType/:txnId", "/v3/rooms/:roomId/send/:ev
   const { roomId, eventType, txnId } = req.params;
   const content = req.body;
   const client = matrixClient.getClient();
+
+  // 进度条逻辑
+  if (progressState.isEnabled() && eventType === "m.room.message" && content.msgtype === "m.text") {
+    const body = content.body || "";
+    const { messageId: currentMessageId } = progressState.getCurrentMessage();
+
+    // 启发式判断是否为中间过程日志
+    const isLog = body.length < 200 && (
+      body.includes("...") || 
+      body.includes("读取") || 
+      body.includes("分析") || 
+      body.includes("搜索") || 
+      body.includes("生成") ||
+      body.includes("Reading") ||
+      body.includes("Analyzing") ||
+      body.includes("Searching") ||
+      body.includes("Generating")
+    );
+
+    if (isLog) {
+      const progressBar = formatProgressBar(body);
+      if (!currentMessageId) {
+        try {
+          const response = await matrixClient.sendMessage(roomId, progressBar);
+          progressState.setCurrentMessage(roomId, response.event_id);
+          return res.json(response);
+        } catch (err: any) {
+          logger.error("发送进度条初始消息失败:", err);
+        }
+      } else {
+        try {
+          const response = await matrixClient.editMessage(roomId, currentMessageId, progressBar);
+          return res.json(response);
+        } catch (err: any) {
+          logger.error("更新进度条失败:", err);
+          // 如果编辑失败（例如消息被删），清除状态并回退到普通发送
+          progressState.clearCurrentMessage();
+        }
+      }
+    } else if (currentMessageId) {
+      // 最终回复：替换进度条并清除状态
+      try {
+        const response = await matrixClient.editMessage(roomId, currentMessageId, body);
+        progressState.clearCurrentMessage();
+        return res.json(response);
+      } catch (err: any) {
+        logger.error("用最终回复替换进度条失败:", err);
+        progressState.clearCurrentMessage();
+      }
+    }
+  }
 
   try {
     const response = await client.sendEvent(roomId, eventType, content, txnId);

@@ -108,6 +108,21 @@ export class MatrixClientWrapper {
     return await this.client.sendTextMessage(roomId, message);
   }
 
+  public async editMessage(roomId: string, messageId: string, newContent: string) {
+    return await (this.client as any).sendEvent(roomId, "m.room.message", {
+      "m.new_content": {
+        "msgtype": "m.text",
+        "body": newContent,
+      },
+      "m.relates_to": {
+        "event_id": messageId,
+        "rel_type": "m.replace",
+      },
+      "msgtype": "m.text",
+      "body": ` * ${newContent}`, // Fallback for clients that don't support edits
+    });
+  }
+
   public isReady() {
     return this.isInitialized;
   }
