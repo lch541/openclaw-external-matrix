@@ -111,12 +111,10 @@ router.put(["/rooms/:roomId/send/:eventType/:txnId", "/v3/rooms/:roomId/send/:ev
           return res.json(response);
         } catch (err: any) {
           logger.error("更新进度条失败:", err);
-          // 如果编辑失败（例如消息被删），清除状态并回退到普通发送
           progressState.clearCurrentMessage();
         }
       }
     } else if (currentMessageId) {
-      // 最终回复：替换进度条并清除状态
       try {
         const response = await matrixClient.editMessage(roomId, currentMessageId, body);
         progressState.clearCurrentMessage();
@@ -141,6 +139,64 @@ router.get(["/joined_rooms", "/v3/joined_rooms"], (req, res) => {
   const client = matrixClient.getClient();
   const rooms = client.getRooms().map((r) => r.roomId);
   res.json({ joined_rooms: rooms });
+});
+
+// 新增：获取房间成员列表
+router.get(["/rooms/:roomId/joined_members", "/v3/rooms/:roomId/joined_members"], (req, res) => {
+  const { roomId } = req.params;
+  const client = matrixClient.getClient();
+  const room = client.getRoom(roomId);
+  
+  if (!room) {
+    return res.status(404).json({ errcode: "M_NOT_FOUND", error: "Room not found" });
+  }
+
+  const members: Record<string, any> = {};
+  room.getMembers().forEach((member: any) => {
+    const userId = member.userId;
+    members[userId] = {
+      avatar_url: member.avatarUrl || "",
+      display_name: member.name || userId,
+    };
+  });
+
+  res.json({ joined_members: members });
+});
+
+// 新增：获取房间成员状态
+router.get(["/rooms/:roomId/state/m.room.member/:userId", "/v3/rooms/:roomId/state/m.room.member/:userId"], (req, res) => {
+  const { roomId, userId } = req.params;
+  const client = matrixClient.getClient();
+  const room = client.getRoom(roomId);
+  
+  if (!room) {
+    return res.status(404).json({ errcode: "M_NOT_FOUND", error: "Room not found" });
+  }
+
+  const member = room.getMember(userId);
+  
+  if (!member) {
+    return res.status(404).json({ errcode: "M_NOT_FOUND", error: "Member not found" });
+  }
+
+  res.json({
+    type: "m.room.member",
+    state_key: userId,
+    sender: userId,
+    content: {
+      avatar_url: member.avatarUrl || "",
+      displayname: member.name || "",
+      membership: "join",
+    },
+    unsigned: {},
+    user_id: userId,
+    room_id: roomId,
+  });
+});
+
+// 新增：用户账户数据（解决 m.direct 问题）
+router.get(["/user/:userId/account_data/m.direct", "/v3/user/:userId/account_data/m.direct"], (req, res) => {
+  res.json({});
 });
 
 router.get(["/account/whoami", "/v3/account/whoami"], (req, res) => {
