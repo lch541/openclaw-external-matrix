@@ -4,6 +4,9 @@ import fs from "fs";
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
 import { EventEmitter } from "events";
+import { progressState } from "../progress/state.js";
+import { reviveCommand } from "../commands/revive.js";
+import { tokenCommand } from "../commands/token.js";
 
 export class MatrixClientWrapper {
   private client: sdk.MatrixClient;
@@ -40,7 +43,7 @@ export class MatrixClientWrapper {
       }
     });
 
-    this.client.on(sdk.RoomEvent.Timeline, (event: any, room: any, toStartOfTimeline: boolean | undefined) => {
+    this.client.on(sdk.RoomEvent.Timeline, async (event: any, room: any, toStartOfTimeline: boolean | undefined) => {
       if (toStartOfTimeline) return;
 
       if (event.getType() === "m.room.message") {
@@ -52,15 +55,85 @@ export class MatrixClientWrapper {
           return;
         }
 
-        logger.info(`收到新消息 [${room?.roomId}] ${sender}: ${event.getContent().body}`);
+        const content = event.getContent();
+        if (content.msgtype !== "m.text") return;
 
+        const body = content.body?.trim();
+        if (!body) return;
+
+        const roomId = room?.roomId;
+        logger.info(`收到新消息 [${roomId}] ${sender}: ${body}`);
+
+        // --- 命令拦截逻辑 ---
+        const parts = body.split(/\s+/);
+
+        // 1. 拦截 /progress 命令
+        if (body.startsWith("/progress ")) {
+          const subCmd = parts[1]; // on / off
+          if (subCmd === "on") {
+            // 转换为 /verbose on 并发送给 OpenClaw
+            this.injectUserMessage(roomId, "/verbose on", sender);
+            progressState.enable();
+            await this.sendMessage(roomId, "✅ 进度条模式已开启");
+          } else if (subCmd === "off") {
+            // 转换为 /verbose off 并发送给 OpenClaw
+            this.injectUserMessage(roomId, "/verbose off", sender);
+            progressState.disable();
+            await this.sendMessage(roomId, "⚪ 进度条模式已关闭");
+          }
+          return; // 拦截，不转发原始消息
+        }
+
+        // 2. /verbose 命令不拦截，直接转发
+        if (body.startsWith("/verbose ")) {
+          // 直接进入转发逻辑
+        } else if (body.startsWith("openclaw ")) {
+          // 3. 拦截插件原生命令
+          const cmd = parts[1];
+          try {
+            if (cmd === "revive") {
+              const subCmd = parts[2];
+              if (subCmd === "token") {
+                const action = parts[3];
+                if (action === "set") {
+                  const token = parts[4];
+                  if (!token) {
+                    await this.sendMessage(roomId, "❌ 请提供 Token: openclaw revive token set <TOKEN>");
+                  } else {
+                    await tokenCommand.set(roomId, token, this.sendMessage.bind(this));
+                  }
+                } else if (action === "show") {
+                  await tokenCommand.show(roomId, this.sendMessage.bind(this));
+                } else if (action === "remove") {
+                  await tokenCommand.remove(roomId, this.sendMessage.bind(this));
+                } else {
+                  await this.sendMessage(roomId, "❓ 未知 token 命令。可用: set, show, remove");
+                }
+              } else {
+                const token = subCmd;
+                if (!token) {
+                  await this.sendMessage(roomId, "❌ 请提供 Token: openclaw revive <TOKEN>");
+                } else {
+                  await reviveCommand.execute(roomId, token, this.sendMessage.bind(this));
+                }
+              }
+              return; // 拦截，不转发给 OpenClaw
+            }
+          } catch (err: any) {
+            logger.error(`执行插件命令失败: ${err.message}`);
+            await this.sendMessage(roomId, `❌ 执行失败: ${err.message}`);
+            return;
+          }
+        }
+
+        // --- 转发逻辑 ---
         const decryptedEvent = {
           ...event.event,
           type: "m.room.message",
           content: event.getContent(),
         };
 
-        this.unreadEvents.push({ roomId: room?.roomId, event: decryptedEvent });
+        this.unreadEvents.push({ roomId, event: decryptedEvent });
         this.syncEmitter.emit("new_event");
       }
     });

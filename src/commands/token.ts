@@ -1,27 +1,26 @@
 import { config } from "../config.js";
 import { logger } from "../utils/logger.js";
-import { matrixClient } from "../matrix/client.js";
 
 export const tokenCommand = {
-  set: async (roomId: string, token: string) => {
+  set: async (roomId: string, token: string, sendMessage: (roomId: string, msg: string) => Promise<any>) => {
     config.setReviveToken(token);
     logger.info(`Token 已设置: ${token.slice(0, 2)}...`);
-    await matrixClient.sendMessage(roomId, "✅ Token 设置成功！");
+    await sendMessage(roomId, "✅ Token 设置成功！");
   },
   
-  show: async (roomId: string) => {
+  show: async (roomId: string, sendMessage: (roomId: string, msg: string) => Promise<any>) => {
     const token = config.getReviveToken();
     if (token) {
       const masked = `${token.slice(0, 2)}****${token.slice(-2)}`;
-      await matrixClient.sendMessage(roomId, `🔑 当前 Token: ${masked}`);
+      await sendMessage(roomId, `🔑 当前 Token: ${masked}`);
     } else {
-      await matrixClient.sendMessage(roomId, "⚠️ 未设置 Token。");
+      await sendMessage(roomId, "⚠️ 未设置 Token。");
     }
   },
   
-  remove: async (roomId: string) => {
+  remove: async (roomId: string, sendMessage: (roomId: string, msg: string) => Promise<any>) => {
     config.removeReviveToken();
     logger.info("Token 已删除");
-    await matrixClient.sendMessage(roomId, "✅ Token 已删除。");
+    await sendMessage(roomId, "✅ Token 已删除。");
   }
 };

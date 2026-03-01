@@ -5,7 +5,6 @@ import { logger } from "./utils/logger.js";
 import { matrixClient } from "./matrix/client.js";
 import matrixRoutes from "./routes/matrix.js";
 import notifyRoutes from "./routes/notify.js";
-import { setupCommandListener } from "./routes/commands.js";
 
 const app = express();
 
@@ -28,8 +27,6 @@ app.use("/api", notifyRoutes);
 // 启动 Matrix 客户端
 matrixClient.start().then(() => {
   logger.info("Matrix 客户端启动流程已发起");
-  // 设置命令监听
-  setupCommandListener();
 });
 
 // 兜底路由
