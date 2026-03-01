@@ -1,103 +1,82 @@
 #!/bin/bash
 set -e
 
-echo "================================================="
-echo "  OpenClaw Matrix Client 卸载脚本"
-echo "================================================="
+echo "========================================="
+echo "  OpenClaw External Matrix 卸载"
+echo "========================================="
+echo ""
 
-# 默认 OpenClaw 目录为当前执行目录
-OPENCLAW_DIR=$(pwd)
-PLUGIN_DIR="$OPENCLAW_DIR/extensions/matrix-plugin"
+INSTALL_DIR="$HOME/.openclaw/external-matrix"
 
-# 1. 停止并移除本地 E2EE 代理服务
-echo ">>> 步骤 1: 停止本地 E2EE 代理服务"
+# 停止服务
+echo ">>> 停止服务"
+
 if command -v pm2 &> /dev/null; then
-    pm2 delete matrix-e2ee-proxy &> /dev/null || true
-    pm2 delete openclaw-external-matrix &> /dev/null || true
-    pm2 save &> /dev/null || true
-    echo "[成功] 已从 pm2 中移除相关服务。"
-fi
-
-for service in "matrix-e2ee-proxy.service" "openclaw-external-matrix.service"; do
-    if systemctl --user is-active --quiet "$service" 2>/dev/null || systemctl --user is-enabled --quiet "$service" 2>/dev/null; then
-        systemctl --user stop "$service" || true
-        systemctl --user disable "$service" || true
-        rm -f "$HOME/.config/systemd/user/$service"
-        echo "[成功] 已移除 systemd 中的 $service 服务。"
+    if pm2 describe openclaw-external-matrix &> /dev/null; then
+        pm2 stop openclaw-external-matrix
+        pm2 delete openclaw-external-matrix
+        pm2 save
+        echo "✅ pm2 服务已停止"
     fi
-done
-systemctl --user daemon-reload || true
-
-# 尝试杀死后台进程 (兜底)
-pkill -f "matrix-e2ee-proxy" || true
-pkill -f "openclaw-external-matrix" || true
-echo "[提示] 已清理后台运行的代理进程。"
-
-# 2. 移除插件目录和相关文件
-echo ""
-echo ">>> 步骤 2: 移除插件目录"
-if [ -d "$PLUGIN_DIR" ]; then
-    rm -rf "$PLUGIN_DIR"
-    echo "[成功] 已删除插件目录: $PLUGIN_DIR"
-else
-    echo "[提示] 插件目录不存在，无需删除。"
 fi
 
-# 3. 清理 OpenClaw 配置文件
+if systemctl --user list-unit-files | grep -q "openclaw-external-matrix.service"; then
+    systemctl --user stop openclaw-external-matrix.service 2>/dev/null || true
+    systemctl --user disable openclaw-external-matrix.service 2>/dev/null || true
+    rm -f "$HOME/.config/systemd/user/openclaw-external-matrix.service"
+    systemctl --user daemon-reload 2>/dev/null || true
+    echo "✅ systemd 服务已停止"
+fi
+
 echo ""
-echo ">>> 步骤 3: 清理 OpenClaw 配置文件中的 Matrix 配置"
+
+# 恢复配置
+echo ">>> 恢复 OpenClaw 配置"
+
 OPENCLAW_CONFIG="$HOME/.openclaw/openclaw.json"
-if [ ! -f "$OPENCLAW_CONFIG" ]; then
-    ALT_CONFIG=$(ls /home/*/.openclaw/openclaw.json 2>/dev/null | head -n 1 || true)
-    if [ -n "$ALT_CONFIG" ]; then
-        OPENCLAW_CONFIG="$ALT_CONFIG"
+
+# 查找最新的备份文件
+BACKUP_FILE=$(ls -t "$HOME/.openclaw/openclaw.json.external_matrix_backup_"* 2>/dev/null | head -n 1 || true)
+
+if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
+    cp "$BACKUP_FILE" "$OPENCLAW_CONFIG"
+    echo "✅ 已恢复配置: $BACKUP_FILE"
+    rm -f "$BACKUP_FILE"
+else
+    # 手动移除 matrix 配置
+    if [ -f "$OPENCLAW_CONFIG" ]; then
+        node -e "
+const fs = require('fs');
+const config = JSON.parse(fs.readFileSync('$OPENCLAW_CONFIG', 'utf8'));
+if (config.channels && config.channels.matrix) {
+    delete config.channels.matrix;
+    if (Object.keys(config.channels).length === 0) {
+        delete config.channels;
+    }
+    fs.writeFileSync('$OPENCLAW_CONFIG', JSON.stringify(config, null, 2));
+    console.log('Matrix 信道配置已移除');
+}
+"
     fi
 fi
 
-if [ -f "$OPENCLAW_CONFIG" ]; then
-    # 使用 Node.js 脚本安全地修改 JSON5 文件
-    cat > "cleanup_config.cjs" << 'EOF'
-const fs = require('fs');
-const path = process.argv[2];
-
-try {
-  let content = fs.readFileSync(path, 'utf8');
-  
-  // 移除所有 Matrix 相关的插件配置
-  const regexMatrixPlugin = /"@openclaw\/matrix-plugin(-custom)?"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
-  content = content.replace(regexMatrixPlugin, '');
-  
-  // 移除 channels.matrix 配置
-  const regexChannel = /"matrix"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
-  content = content.replace(regexChannel, '');
-  
-  // 清理多余逗号和空行
-  content = content.replace(/,\s*,/g, ',');
-  content = content.replace(/,\s*\}/g, '\n  }');
-  
-  fs.writeFileSync(path, content, 'utf8');
-  console.log('[成功] 已从 openclaw.json 中移除 Matrix 相关配置。');
-} catch (e) {
-  console.error('[错误] 修改配置文件失败:', e.message);
-}
-EOF
-    node "cleanup_config.cjs" "$OPENCLAW_CONFIG"
-    rm -f "cleanup_config.cjs"
-else
-    echo "[提示] 未找到 OpenClaw 配置文件，无需清理。"
-fi
-
-# 4. 重启 OpenClaw
 echo ""
-echo ">>> 步骤 4: 重启 OpenClaw"
-if command -v pm2 &> /dev/null && pm2 describe openclaw &> /dev/null; then
-    pm2 restart openclaw
-    echo "[成功] 已通过 pm2 重启 OpenClaw。"
-elif systemctl is-active --quiet openclaw-gateway; then
-    systemctl --user restart openclaw-gateway || sudo systemctl restart openclaw-gateway || true
-    echo "[成功] 已通过 systemctl 重启 OpenClaw。"
+
+# 删除安装目录
+if [ -d "$INSTALL_DIR" ]; then
+    echo ">>> 删除安装目录"
+    read -p "确定要删除 $INSTALL_DIR 吗? [y/N]: " CONFIRM < /dev/tty
+    if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+        rm -rf "$INSTALL_DIR"
+        echo "✅ 安装目录已删除"
+    fi
 fi
 
-echo "================================================="
-echo "  卸载完成！Matrix 环境已彻底清理。"
-echo "================================================="
+echo ""
+echo "========================================="
+echo "  卸载完成"
+echo "========================================="
+echo ""
+echo "如需重新使用 Matrix 信道，请运行:"
+echo "  openclaw configure --section channels"
+echo ""
