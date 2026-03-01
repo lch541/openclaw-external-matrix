@@ -67,116 +67,154 @@ HOMESERVER=${HOMESERVER:-https://matrix.org}
 read -p "请输入 User ID (例如: @bot:matrix.org): " USER_ID < /dev/tty
 read -p "请输入 Access Token: " ACCESS_TOKEN < /dev/tty
 read -p "请输入 Room ID (例如: !room:matrix.org): " ROOM_ID < /dev/tty
+read -p "请输入设备 ID (可选, 默认: OPENCLAW_PROXY): " DEVICE_ID < /dev/tty
+DEVICE_ID=${DEVICE_ID:-OPENCLAW_PROXY}
 
-# 5. 写入配置信息
+# 5. 写入配置信息到本地代理 (.env)
 echo ""
-echo ">>> 步骤 5: 写入配置信息到 OpenClaw 系统"
-PLUGIN_CONFIG_DIR="$PLUGIN_DIR/config"
-mkdir -p "$PLUGIN_CONFIG_DIR"
-
-cat > "$PLUGIN_CONFIG_DIR/matrix_config.md" << EOF
-# Matrix Configuration
-
-\`\`\`json
-{
-  "homeserver": "$HOMESERVER",
-  "userId": "$USER_ID",
-  "accessToken": "$ACCESS_TOKEN",
-  "roomId": "$ROOM_ID"
-}
-\`\`\`
+echo ">>> 步骤 5: 写入配置信息到本地代理 (.env)"
+cat > "$PLUGIN_DIR/.env" << EOF
+REAL_HOMESERVER=$HOMESERVER
+USER_ID=$USER_ID
+ACCESS_TOKEN=$ACCESS_TOKEN
+ROOM_ID=$ROOM_ID
+DEVICE_ID=$DEVICE_ID
+PROXY_PORT=3000
 EOF
-echo "[成功] 配置已保存。"
+echo "[成功] 代理配置已保存到 .env。"
 
-# 6. 注册插件到 OpenClaw 配置
+# 6. 注册官方信道到 OpenClaw 配置
 echo ""
-echo ">>> 步骤 6: 注册插件到 OpenClaw"
+echo ">>> 步骤 6: 注册官方信道到 OpenClaw (指向本地代理)"
 if [ -f "$OPENCLAW_CONFIG" ]; then
-    # 使用 Node.js 脚本安全地修改 JSON5 文件，避免 jq 破坏格式
+    # 使用 Node.js 脚本安全地修改 JSON5 文件
     cat > "$PLUGIN_DIR/update_config.cjs" << 'EOF'
 const fs = require('fs');
 const path = process.argv[2];
-const pluginDir = process.argv[3];
-const homeserver = process.argv[4];
-const userId = process.argv[5];
-const accessToken = process.argv[6];
-const roomId = process.argv[7];
+const proxyUrl = process.argv[3];
+const userId = process.argv[4];
+const accessToken = process.argv[5];
+const roomId = process.argv[6];
 
 try {
   let content = fs.readFileSync(path, 'utf8');
   
-  // 移除旧的 channels.matrix 配置（如果有，防止冲突）
+  // 彻底移除旧的插件配置 (解耦，不再需要注入插件)
+  const regexNested = /"@openclaw\/matrix-plugin"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
+  const regexFlat = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,?/g;
+  const regexCustomNested = /"@openclaw\/matrix-plugin-custom"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
+  const regexCustomFlat = /"@openclaw\/matrix-plugin-custom"\s*:\s*\{[^}]*\}\s*,?/g;
+  content = content.replace(regexNested, '');
+  content = content.replace(regexFlat, '');
+  content = content.replace(regexCustomNested, '');
+  content = content.replace(regexCustomFlat, '');
+  
+  // 移除旧的 channels.matrix 配置
   const regexChannel = /"matrix"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
   content = content.replace(regexChannel, '');
   
-  // 移除旧的 plugins.installs 配置
-  const regexNested = /"@openclaw\/matrix-plugin"\s*:\s*\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}\s*,?/g;
-  const regexFlat = /"@openclaw\/matrix-plugin"\s*:\s*\{[^}]*\}\s*,?/g;
-  content = content.replace(regexNested, '');
-  content = content.replace(regexFlat, '');
-  
-  // 正确的本地插件注册格式：伪装成 npm 包，使用 file:// 协议
-  const pluginEntry = `"@openclaw/matrix-plugin": {
-      "source": "npm",
-      "version": "file://${pluginDir}",
-      "config": {
-        "homeserver": "${homeserver}",
-        "userId": "${userId}",
-        "accessToken": "${accessToken}",
-        "roomId": "${roomId}"
-      }
+  // 注入官方信道 (Channel) 配置，Homeserver 指向本地代理！
+  const channelEntry = `"matrix": {
+      "enabled": true,
+      "homeserver": "${proxyUrl}",
+      "userId": "${userId}",
+      "accessToken": "${accessToken}",
+      "roomId": "${roomId}"
     }`;
   
-  if (/"installs"\s*:/.test(content)) {
-    // 存在 installs 节点
-    content = content.replace(/"installs"\s*:\s*\{/, `"installs": {\n      ${pluginEntry},`);
-  } else if (/"plugins"\s*:/.test(content)) {
-    // 存在 plugins 节点，但没有 installs
-    content = content.replace(/"plugins"\s*:\s*\{/, `"plugins": {\n    "installs": {\n      ${pluginEntry}\n    },`);
+  if (/"channels"\s*:/.test(content)) {
+    content = content.replace(/"channels"\s*:\s*\{/, `"channels": {\n      ${channelEntry},`);
   } else {
-    // 连 plugins 节点都没有，插入到文件末尾的 } 之前
     const lastBrace = content.lastIndexOf('}');
     if (lastBrace !== -1) {
       const beforeBrace = content.slice(0, lastBrace).trim();
       const needsComma = !beforeBrace.endsWith(',') && !beforeBrace.endsWith('{');
       const prefix = needsComma ? ',' : '';
-      
-      const insertStr = `${prefix}\n  "plugins": {\n    "installs": {\n      ${pluginEntry}\n    }\n  }\n`;
+      const insertStr = `${prefix}\n  "channels": {\n    ${channelEntry}\n  }\n`;
       content = content.slice(0, lastBrace) + insertStr + content.slice(lastBrace);
-    } else {
-      throw new Error("Invalid JSON format: missing closing brace.");
     }
   }
-  
-  // 清理可能产生的多余逗号
+
+  // 清理多余逗号
   content = content.replace(/,\s*,/g, ',');
+  content = content.replace(/,\s*\}/g, '\n  }');
   
   fs.writeFileSync(path, content, 'utf8');
-  console.log('[成功] 已将插件注册到 openclaw.json 的 plugins.installs 节点');
+  console.log('[成功] 已将官方 Matrix 信道配置为指向本地 E2EE 代理 (127.0.0.1:3000)');
 } catch (e) {
   console.error('[错误] 修改配置文件失败:', e.message);
 }
 EOF
     
-    node "$PLUGIN_DIR/update_config.cjs" "$OPENCLAW_CONFIG" "$PLUGIN_DIR" "$HOMESERVER" "$USER_ID" "$ACCESS_TOKEN" "$ROOM_ID"
+    node "$PLUGIN_DIR/update_config.cjs" "$OPENCLAW_CONFIG" "http://127.0.0.1:3000" "$USER_ID" "$ACCESS_TOKEN" "$ROOM_ID"
     rm -f "$PLUGIN_DIR/update_config.cjs"
 else
     echo "[提示] 未找到 openclaw.json，跳过自动注册。"
 fi
 
-# 7. 运行 OpenClaw Doctor 修复潜在的配置错误
+# 7. 启用官方信道并运行 OpenClaw Doctor
 echo ""
-echo ">>> 步骤 7: 运行 openclaw doctor --fix"
+echo ">>> 步骤 7: 启用官方信道并运行 openclaw doctor --fix"
 if command -v openclaw &> /dev/null; then
+    openclaw plugins enable matrix || true
     openclaw doctor --fix || true
 else
-    # 尝试使用 npx 运行
+    npx -y @openclaw/cli plugins enable matrix || true
     npx -y @openclaw/cli doctor --fix || true
 fi
 
-# 8. 重启 OpenClaw
+# 8. 启动本地 E2EE 代理服务并设置开机自启
 echo ""
-echo ">>> 步骤 8: 重启 OpenClaw"
+echo ">>> 步骤 8: 启动本地 E2EE 代理服务并设置开机自启"
+cd "$PLUGIN_DIR"
+if command -v pm2 &> /dev/null; then
+    # 使用 pm2 启动代理服务
+    pm2 delete matrix-e2ee-proxy &> /dev/null || true
+    pm2 start npm --name "matrix-e2ee-proxy" -- run dev
+    pm2 save
+    echo "[成功] 已通过 pm2 启动本地 E2EE 代理服务 (matrix-e2ee-proxy)。"
+    echo "[提示] 请确保您已经运行过 'pm2 startup' 以启用 pm2 的开机自启功能。"
+else
+    # 如果没有 pm2，则使用 systemd 用户服务来实现开机自启
+    echo "[提示] 未检测到 pm2，将使用 systemd 配置开机自启..."
+    SERVICE_DIR="$HOME/.config/systemd/user"
+    mkdir -p "$SERVICE_DIR"
+    SERVICE_FILE="$SERVICE_DIR/matrix-e2ee-proxy.service"
+    
+    NPM_PATH=$(command -v npm)
+    
+    cat > "$SERVICE_FILE" << EOF
+[Unit]
+Description=Matrix E2EE Proxy for OpenClaw
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$PLUGIN_DIR
+ExecStart=$NPM_PATH run dev
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable matrix-e2ee-proxy.service
+    systemctl --user restart matrix-e2ee-proxy.service
+    
+    # 尝试启用 loginctl linger 以确保用户未登录时也能自启
+    if command -v loginctl &> /dev/null; then
+        loginctl enable-linger $USER || true
+    fi
+    
+    echo "[成功] 已通过 systemd 启动本地 E2EE 代理服务并设置开机自启。"
+fi
+cd - > /dev/null
+
+# 9. 重启 OpenClaw
+echo ""
+echo ">>> 步骤 9: 重启 OpenClaw"
 if command -v pm2 &> /dev/null && pm2 describe openclaw &> /dev/null; then
     pm2 restart openclaw
     echo "[成功] 已通过 pm2 重启 OpenClaw。"

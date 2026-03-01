@@ -22,6 +22,7 @@
     "lucide-react": "^0.546.0",
     "matrix-js-sdk": "^41.0.0-rc.0",
     "motion": "^12.23.24",
+    "node-localstorage": "^3.0.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "socket.io": "^4.8.3",
